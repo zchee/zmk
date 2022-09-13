@@ -25,6 +25,18 @@
 #include <zmk/events/activity_state_changed.h>
 #include <zmk/events/usb_conn_state_changed.h>
 #include <zmk/workqueue.h>
+#include <zmk/events/hid_indicators_changed.h>
+#include <zmk/events/split_peripheral_status_changed.h>
+#include <zmk/hid_indicators.h>
+#include <zmk/battery.h>
+#include <zmk/keymap.h>
+#include <zmk/ble.h>
+
+#if ZMK_BLE_IS_CENTRAL
+#include <zmk/split/bluetooth/central.h>
+#else
+#include <zmk/split/bluetooth/peripheral.h>
+#endif
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -49,6 +61,9 @@ enum rgb_underglow_effect {
     UNDERGLOW_EFFECT_BREATHE,
     UNDERGLOW_EFFECT_SPECTRUM,
     UNDERGLOW_EFFECT_SWIRL,
+    UNDERGLOW_EFFECT_KINESIS,
+    UNDERGLOW_EFFECT_BATTERY,
+    UNDERGLOW_EFFECT_TEST,
     UNDERGLOW_EFFECT_NUMBER // Used to track number of underglow effects
 };
 
@@ -130,6 +145,12 @@ static struct led_rgb hsb_to_rgb(struct zmk_led_hsb hsb) {
     return rgb;
 }
 
+int zmk_rgb_underglow_set_periph(struct zmk_periph_led periph) {
+    led_data = periph;
+    LOG_DBG("Update led_data %d %d", led_data.layer, led_data.indicators);
+    return 0;
+}
+
 static void zmk_rgb_underglow_effect_solid(void) {
     for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
         pixels[i] = hsb_to_rgb(hsb_scale_min_max(state.color));
@@ -189,6 +210,15 @@ static void zmk_rgb_underglow_tick(struct k_work *work) {
     case UNDERGLOW_EFFECT_SWIRL:
         zmk_rgb_underglow_effect_swirl();
         break;
+    case UNDERGLOW_EFFECT_KINESIS:
+        zmk_rgb_underglow_effect_kinesis();
+        break;
+    case UNDERGLOW_EFFECT_BATTERY:
+        zmk_rgb_underglow_effect_battery();
+        break;
+    case UNDERGLOW_EFFECT_TEST:
+        zmk_rgb_underglow_effect_test();
+        break;
     }
 
     int err = led_strip_update_rgb(led_strip, pixels, STRIP_NUM_PIXELS);
@@ -239,6 +269,15 @@ static void zmk_rgb_underglow_save_state_work(struct k_work *_work) {
 static struct k_work_delayable underglow_save_work;
 #endif
 
+int zmk_rgb_underglow_save_state(void) {
+#if IS_ENABLED(CONFIG_SETTINGS)
+    int ret = k_work_reschedule(&underglow_save_work, K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE));
+    return MIN(ret, 0);
+#else
+    return 0;
+#endif
+}
+
 static int zmk_rgb_underglow_init(void) {
     led_strip = DEVICE_DT_GET(STRIP_CHOSEN);
 
@@ -269,30 +308,23 @@ static int zmk_rgb_underglow_init(void) {
         LOG_ERR("Failed to register the ext_power settings handler (err %d)", err);
         return err;
     }
-
+    led_data.indicators = 0;
     k_work_init_delayable(&underglow_save_work, zmk_rgb_underglow_save_state_work);
 
     settings_load_subtree("rgb/underglow");
 #endif
 
-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
-    state.on = zmk_usb_is_powered();
+#if ZMK_BLE_IS_CENTRAL
+    k_work_init_delayable(&led_update_work, zmk_rgb_underglow_central_send);
 #endif
 
-    if (state.on) {
-        k_timer_start(&underglow_tick, K_NO_WAIT, K_MSEC(50));
-    }
-
+    zmk_rgb_underglow_save_state();
+    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &underglow_tick_work);
+    zmk_rgb_underglow_off();
+    if (IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_ON_START))
+        zmk_rgb_underglow_on();
+    triggered = false;
     return 0;
-}
-
-int zmk_rgb_underglow_save_state(void) {
-#if IS_ENABLED(CONFIG_SETTINGS)
-    int ret = k_work_reschedule(&underglow_save_work, K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE));
-    return MIN(ret, 0);
-#else
-    return 0;
-#endif
 }
 
 int zmk_rgb_underglow_get_state(bool *on_off) {
@@ -472,17 +504,15 @@ static int rgb_underglow_auto_state(bool *prev_state, bool new_state) {
     if (state.on == new_state) {
         return 0;
     }
-    if (new_state) {
-        state.on = *prev_state;
-        *prev_state = false;
+    state.on = new_state && *prev_state;
+    *prev_state = !new_state;
+    if (state.on)
         return zmk_rgb_underglow_on();
-    } else {
-        state.on = false;
-        *prev_state = true;
+    else
         return zmk_rgb_underglow_off();
-    }
 }
 
+#endif
 static int rgb_underglow_event_listener(const zmk_event_t *eh) {
 
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE)
@@ -495,8 +525,29 @@ static int rgb_underglow_event_listener(const zmk_event_t *eh) {
 
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
     if (as_zmk_usb_conn_state_changed(eh)) {
+        led_data.indicators = zmk_hid_indicators_get_current_profile();
+        led_data.layer = zmk_keymap_highest_layer_active();
+        int err = zmk_split_bt_update_led(&led_data);
+        if (err) {
+            LOG_ERR("send failed (err %d)", err);
+        }
         static bool prev_state = false;
         return rgb_underglow_auto_state(&prev_state, zmk_usb_is_powered());
+    }
+#endif
+
+#if ZMK_BLE_IS_CENTRAL
+    if (as_zmk_split_peripheral_status_changed(eh)) {
+        LOG_DBG("event called");
+        const struct zmk_split_peripheral_status_changed *ev;
+        ev = as_zmk_split_peripheral_status_changed(eh);
+        if (ev->connected) {
+            k_work_reschedule(&led_update_work, K_MSEC(2500));
+            return 0;
+        } else {
+            k_work_cancel_delayable(&led_update_work);
+            return 0;
+        }
     }
 #endif
 
@@ -504,8 +555,7 @@ static int rgb_underglow_event_listener(const zmk_event_t *eh) {
 }
 
 ZMK_LISTENER(rgb_underglow, rgb_underglow_event_listener);
-#endif // IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE) ||
-       // IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
+// IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
 
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE)
 ZMK_SUBSCRIPTION(rgb_underglow, zmk_activity_state_changed);
@@ -513,6 +563,10 @@ ZMK_SUBSCRIPTION(rgb_underglow, zmk_activity_state_changed);
 
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
 ZMK_SUBSCRIPTION(rgb_underglow, zmk_usb_conn_state_changed);
+#endif
+
+#if ZMK_BLE_IS_CENTRAL
+ZMK_SUBSCRIPTION(rgb_underglow, zmk_split_peripheral_status_changed);
 #endif
 
 SYS_INIT(zmk_rgb_underglow_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

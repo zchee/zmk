@@ -42,6 +42,8 @@ static void split_svc_sensor_state_ccc(const struct bt_gatt_attr *attr, uint16_t
     LOG_DBG("value %d", value);
 }
 #endif /* ZMK_KEYMAP_HAS_SENSORS */
+#include <zmk/rgb_underglow.h>
+#include <zmk/backlight.h>
 
 #define POS_STATE_LEN 16
 
@@ -49,6 +51,8 @@ static uint8_t num_of_positions = ZMK_KEYMAP_LEN;
 static uint8_t position_state[POS_STATE_LEN];
 
 static struct zmk_split_run_behavior_payload behavior_run_payload;
+static struct zmk_split_update_led_data update_led_data;
+static struct zmk_split_update_bl_data update_bl_data;
 
 static ssize_t split_svc_pos_state(struct bt_conn *conn, const struct bt_gatt_attr *attrs,
                                    void *buf, uint16_t len, uint16_t offset) {

@@ -70,6 +70,20 @@ config ZMK_SPLIT_BLE_PREF_TIMEOUT
     int "Supervision timeout to use for split central/peripheral connection"
     default 400
 
+config ZMK_SPLIT_BLE_CENTRAL_SPLIT_LED_STACK_SIZE
+    int "BLE split central LED write thread stack size"
+    default 512
+config ZMK_SPLIT_BLE_CENTRAL_SPLIT_LED_QUEUE_SIZE
+    int "Max number of led update events to queue to send to the peripheral(s)"
+    default 5
+
+config ZMK_SPLIT_BLE_CENTRAL_SPLIT_BL_STACK_SIZE
+    int "BLE split central LED write thread stack size"
+    default 512
+config ZMK_SPLIT_BLE_CENTRAL_SPLIT_BL_QUEUE_SIZE
+    int "Max number of led update events to queue to send to the peripheral(s)"
+    default 5
+
 endif # ZMK_SPLIT_ROLE_CENTRAL
 
 if !ZMK_SPLIT_ROLE_CENTRAL
