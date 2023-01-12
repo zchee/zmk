@@ -3,6 +3,8 @@
 
 #include <zephyr/bluetooth/addr.h>
 #include <zmk/behavior.h>
+#include <zmk/rgb_underglow.h>
+#include <zmk/backlight.h>
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
 #include <zmk/hid_indicators_types.h>
