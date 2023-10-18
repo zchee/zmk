@@ -605,18 +605,6 @@ static int zmk_rgb_underglow_init(void) {
     }
 #endif
 
-    state = (struct rgb_underglow_state){
-        color : {
-            h : CONFIG_ZMK_RGB_UNDERGLOW_HUE_START,
-            s : CONFIG_ZMK_RGB_UNDERGLOW_SAT_START,
-            b : CONFIG_ZMK_RGB_UNDERGLOW_BRT_START,
-        },
-        animation_speed : CONFIG_ZMK_RGB_UNDERGLOW_SPD_START,
-        current_effect : CONFIG_ZMK_RGB_UNDERGLOW_EFF_START,
-        animation_step : 0,
-        on : IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_ON_START)
-    };
-
 #if IS_ENABLED(CONFIG_SETTINGS)
     settings_subsys_init();
 
@@ -631,11 +619,22 @@ static int zmk_rgb_underglow_init(void) {
     settings_load_subtree("rgb/underglow");
 #endif
 
+    state = (struct rgb_underglow_state){
+        color : {
+            h : CONFIG_ZMK_RGB_UNDERGLOW_HUE_START,
+            s : CONFIG_ZMK_RGB_UNDERGLOW_SAT_START,
+            b : CONFIG_ZMK_RGB_UNDERGLOW_BRT_START,
+        },
+        animation_speed : CONFIG_ZMK_RGB_UNDERGLOW_SPD_START,
+        current_effect : CONFIG_ZMK_RGB_UNDERGLOW_EFF_START,
+        animation_step : 0,
+        on : IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_ON_START)
+    };
+
 #if ZMK_BLE_IS_CENTRAL
     k_work_init_delayable(&led_update_work, zmk_rgb_underglow_central_send);
 #endif
 
-    zmk_rgb_underglow_save_state();
     k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &underglow_tick_work);
     zmk_rgb_underglow_off();
     if (IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_ON_START))
@@ -669,7 +668,7 @@ int zmk_rgb_underglow_on(void) {
     state.animation_step = 0;
     k_timer_start(&underglow_tick, K_NO_WAIT, K_MSEC(50));
 
-    return zmk_rgb_underglow_save_state();
+    return 0;
 }
 
 static void zmk_rgb_underglow_off_handler(struct k_work *work) {
@@ -700,7 +699,7 @@ int zmk_rgb_underglow_off(void) {
     k_timer_stop(&underglow_tick);
     state.on = false;
 
-    return zmk_rgb_underglow_save_state();
+    return 0;
 }
 
 int zmk_rgb_underglow_calc_effect(int direction) {
@@ -718,7 +717,7 @@ int zmk_rgb_underglow_select_effect(int effect) {
     state.current_effect = effect;
     state.animation_step = 0;
 
-    return zmk_rgb_underglow_save_state();
+    return 0;
 }
 
 int zmk_rgb_underglow_cycle_effect(int direction) {
