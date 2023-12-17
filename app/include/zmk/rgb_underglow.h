@@ -14,9 +14,13 @@ struct zmk_led_hsb {
     uint8_t b;
 };
 
+#define ZMK_LED_NUMLOCK_BIT BIT(0)
+#define ZMK_LED_CAPSLOCK_BIT BIT(1)
+#define ZMK_LED_SCROLLLOCK_BIT BIT(2)
+
 struct zmk_periph_led {
     uint8_t layer;
-    zmk_hid_indicators indicators;
+    zmk_hid_indicators_t indicators;
 };
 
 int zmk_rgb_underglow_toggle(void);
