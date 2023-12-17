@@ -473,33 +473,30 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
 #endif /* IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING) */
     }
 
-    bool subscribed = (slot->run_behavior_handle && slot->subscribe_params.value_handle);
-}
-else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
-                      BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_UPDATE_LED_UUID))) {
-    LOG_DBG("Found update led handle");
-    slot->update_led_handle = bt_gatt_attr_value_handle(attr);
-}
-else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
-                      BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_UPDATE_BL_UUID))) {
-    LOG_DBG("Found update bl handle");
-    slot->update_bl_handle = bt_gatt_attr_value_handle(attr);
-}
+    else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
+                          BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_UPDATE_LED_UUID))) {
+        LOG_DBG("Found update led handle");
+        slot->update_led_handle = bt_gatt_attr_value_handle(attr);
+    } else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
+                            BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CHAR_UPDATE_BL_UUID))) {
+        LOG_DBG("Found update bl handle");
+        slot->update_bl_handle = bt_gatt_attr_value_handle(attr);
+    }
 
-bool subscribed = (slot->update_bl_handle && slot->update_led_handle && slot->run_behavior_handle &&
-                   slot->subscribe_params.value_handle);
+    bool subscribed = (slot->update_bl_handle && slot->update_led_handle &&
+                       slot->run_behavior_handle && slot->subscribe_params.value_handle);
 #if ZMK_KEYMAP_HAS_SENSORS
-subscribed = subscribed && slot->sensor_subscribe_params.value_handle;
+    subscribed = subscribed && slot->sensor_subscribe_params.value_handle;
 #endif /* ZMK_KEYMAP_HAS_SENSORS */
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
-subscribed = subscribed && slot->update_hid_indicators;
+    subscribed = subscribed && slot->update_hid_indicators;
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
     subscribed = subscribed && slot->batt_lvl_subscribe_params.value_handle;
 #endif /* IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING) */
 
-return subscribed ? BT_GATT_ITER_STOP : BT_GATT_ITER_CONTINUE;
+    return subscribed ? BT_GATT_ITER_STOP : BT_GATT_ITER_CONTINUE;
 }
 
 static uint8_t split_central_service_discovery_func(struct bt_conn *conn,
