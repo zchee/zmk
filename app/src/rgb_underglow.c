@@ -157,6 +157,18 @@ static struct led_rgb hsb_to_rgb(struct zmk_led_hsb hsb) {
     return rgb;
 }
 
+#define LED_RGB_HEX(hex)                                                                           \
+    ((struct led_rgb){                                                                             \
+        r : ((hex)&0xFF0000) >> 16,                                                                \
+        g : ((hex)&0x00FF00) >> 8,                                                                 \
+        b : ((hex)&0x0000FF) >> 0                                                                  \
+    })
+
+static struct led_rgb zmk_rgb_underglow_scaled(struct led_rgb raw) {
+    float scale = ((float)CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE) / 100.;
+    return (struct led_rgb){r : scale * raw.r, g : scale * raw.g, b : scale * raw.b};
+}
+
 int zmk_rgb_underglow_set_periph(struct zmk_periph_led periph) {
     led_data = periph;
     LOG_DBG("Update led_data %d %d", led_data.layer, led_data.indicators);
@@ -487,26 +499,21 @@ static void zmk_rgb_underglow_effect_test() {
     }
 }
 
+#define NUM_BATTERY_LEVELS 3
+
+static const uint8_t BATTERY_LEVELS[NUM_BATTERY_LEVELS] = {80, 50, 20};
+
+static const struct led_rgb BATTERY_COLORS[NUM_BATTERY_LEVELS + 1] = {
+    LED_RGB_HEX(0x00FF00), LED_RGB_HEX(0xFFFF00), LED_RGB_HEX(0xFF8C00), LED_RGB_HEX(0xFF0000)};
+
 static void zmk_rgb_underglow_effect_battery() {
     uint8_t soc = zmk_battery_state_of_charge();
-    struct led_rgb rgb;
-    if (soc > 80) {
-        rgb.r = 0;
-        rgb.g = 255;
-        rgb.b = 0;
-    } else if (soc > 50 && soc < 80) {
-        rgb.r = 255;
-        rgb.g = 255;
-        rgb.b = 0;
-    } else if (soc > 20 && soc < 51) {
-        rgb.r = 255;
-        rgb.g = 140;
-        rgb.b = 0;
-    } else {
-        rgb.r = 255;
-        rgb.g = 0;
-        rgb.b = 0;
-    }
+
+    int color = 0;
+    for (; color < NUM_BATTERY_LEVELS && soc < BATTERY_LEVELS[color]; color++)
+        ;
+
+    struct led_rgb rgb = zmk_rgb_underglow_scaled(BATTERY_COLORS[color]);
     for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
         pixels[i] = rgb;
     }
