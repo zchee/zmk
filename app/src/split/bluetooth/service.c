@@ -51,8 +51,6 @@ static uint8_t num_of_positions = ZMK_KEYMAP_LEN;
 static uint8_t position_state[POS_STATE_LEN];
 
 static struct zmk_split_run_behavior_payload behavior_run_payload;
-static struct zmk_split_update_led_data update_led_data;
-static struct zmk_split_update_bl_data update_bl_data;
 
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
 static struct zmk_split_update_led_data update_led_data;
