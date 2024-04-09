@@ -157,17 +157,14 @@ static struct led_rgb hsb_to_rgb(struct zmk_led_hsb hsb) {
     return rgb;
 }
 
-#define LED_RGB_HEX(hex)                                                                           \
-    ((struct led_rgb){                                                                             \
-        r : ((hex)&0xFF0000) >> 16,                                                                \
-        g : ((hex)&0x00FF00) >> 8,                                                                 \
-        b : ((hex)&0x0000FF) >> 0                                                                  \
-    })
+#define LED_RGB_SCALING_MULTIPLE (((float)CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE) / 250.)
 
-static struct led_rgb zmk_rgb_underglow_scaled(struct led_rgb raw) {
-    float scale = ((float)CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE) / 100.;
-    return (struct led_rgb){r : scale * raw.r, g : scale * raw.g, b : scale * raw.b};
-}
+#define LED_RGB(hex)                                                                               \
+    ((struct led_rgb){                                                                             \
+        r : LED_RGB_SCALING_MULTIPLE * (((hex)&0xFF0000) >> 16),                                   \
+        g : LED_RGB_SCALING_MULTIPLE * (((hex)&0x00FF00) >> 8),                                    \
+        b : LED_RGB_SCALING_MULTIPLE * (((hex)&0x0000FF) >> 0)                                     \
+    })
 
 int zmk_rgb_underglow_set_periph(struct zmk_periph_led periph) {
     led_data = periph;
@@ -229,217 +226,105 @@ static void zmk_rgb_underglow_central_send() {
         LOG_ERR("send failed (err %d)", err);
     }
 }
+
+static const struct led_rgb BT_COLORS[8] = {LED_RGB(0xFFFFFF), LED_RGB(0x0000FF), LED_RGB(0xFF0000),
+                                            LED_RGB(0x00FF00), LED_RGB(0x000000)};
 #endif
+
+static const struct led_rgb LAYER_COLORS[8] = {
+    LED_RGB(0x000000), LED_RGB(0xFFFFFF), LED_RGB(0x0000FF), LED_RGB(0x00FF00),
+    LED_RGB(0xFF0000), LED_RGB(0xFF00FF), LED_RGB(0x00FFFF), LED_RGB(0xFFFF00)};
+
+// Formulas chosen so that for the first 8 layers both left and right modules show the same color,
+// then as the layer number increases the right module color cycles through until "wrapping around",
+// at which point the left module colour is advanced by one as well. We skip over the off/black
+// state while we do this. (The right module also skips over the current left module color each
+// loop, since those combinations correspond to the first 8 layers.)
+static void zmk_led_layer_to_colors(uint8_t layer, uint8_t *left, uint8_t *right) {
+    if (layer < 8) {
+        *left = layer;
+        *right = layer;
+        return;
+    }
+
+    *left = 1 + ((layer - 8) / 6);
+    *right = 1 + ((layer - 8) % 6);
+
+    if (*left <= *right)
+        *right += 1;
+}
+
+static bool zmk_kinesis_blink_step(uint8_t idx, uint8_t limit) {
+    state.animation_step++;
+    if (state.animation_step > limit) {
+        last_ble_state[idx] = !last_ble_state[idx];
+        state.animation_step = 0;
+    }
+
+    return !last_ble_state[idx];
+}
 
 static void zmk_rgb_underglow_effect_kinesis() {
 #if ZMK_BLE_IS_CENTRAL
-    // leds for central(left) side
-
+    // update state and propagate to peripheral if necessary
     old_led_data.layer = led_data.layer;
     old_led_data.indicators = led_data.indicators;
     led_data.indicators = zmk_hid_indicators_get_current_profile();
     led_data.layer = zmk_keymap_highest_layer_active();
 
-    pixels[0].r = (led_data.indicators & ZMK_LED_CAPSLOCK_BIT) * CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-    pixels[0].g = (led_data.indicators & ZMK_LED_CAPSLOCK_BIT) * CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-    pixels[0].b = (led_data.indicators & ZMK_LED_CAPSLOCK_BIT) * CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-    // set second led as bluetooth state
-    switch (zmk_ble_active_profile_index()) {
-    case 0:
-        pixels[1].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[1].g = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[1].b = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        break;
-    case 1:
-        pixels[1].r = 0;
-        pixels[1].g = 0;
-        pixels[1].b = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        break;
-    case 2:
-        pixels[1].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[1].g = 0;
-        pixels[1].b = 0;
-        break;
-    case 3:
-        pixels[1].r = 0;
-        pixels[1].g = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[1].b = 0;
-        break;
-    case 4:
-        pixels[1].r = 0;
-        pixels[1].g = 0;
-        pixels[1].b = 0;
-        break;
-    }
-    // blink second led slowly if bluetooth not paired, quickly if not connected
-    if (zmk_ble_active_profile_is_open()) {
-        pixels[1].r = pixels[1].r * last_ble_state[0];
-        pixels[1].g = pixels[1].g * last_ble_state[0];
-        pixels[1].b = pixels[1].b * last_ble_state[0];
-        if (state.animation_step > 3) {
-            last_ble_state[0] = !last_ble_state[0];
-            state.animation_step = 0;
-        }
-        state.animation_step++;
-    } else if (!zmk_ble_active_profile_is_connected()) {
-        pixels[1].r = pixels[1].r * last_ble_state[1];
-        pixels[1].g = pixels[1].g * last_ble_state[1];
-        pixels[1].b = pixels[1].b * last_ble_state[1];
-        if (state.animation_step > 14) {
-            last_ble_state[1] = !last_ble_state[1];
-            state.animation_step = 0;
-        }
-        state.animation_step++;
-    }
-    // set third led as layer state
-    switch (led_data.layer) {
-    case 0:
-        pixels[2].r = 0;
-        pixels[2].g = 0;
-        pixels[2].b = 0;
-        break;
-    case 1:
-        pixels[2].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[2].g = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[2].b = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        break;
-    case 2:
-        pixels[2].r = 0;
-        pixels[2].g = 0;
-        pixels[2].b = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        break;
-    case 3:
-        pixels[2].r = 0;
-        pixels[2].g = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[2].b = 0;
-        break;
-    case 4:
-        pixels[2].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[2].g = 0;
-        pixels[2].b = 0;
-        break;
-    case 5:
-        pixels[2].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[2].g = 0;
-        pixels[2].b = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        break;
-    case 6:
-        pixels[2].r = 0;
-        pixels[2].g = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[2].b = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        break;
-    case 7:
-        pixels[2].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[2].g = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[2].b = 0;
-        break;
-    default:
-        pixels[2].r = 0;
-        pixels[2].g = 0;
-        pixels[2].b = 0;
-        break;
-    }
     if (old_led_data.layer != led_data.layer || old_led_data.indicators != led_data.indicators) {
         zmk_rgb_underglow_central_send();
     }
-#else
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE)
-    // leds for peripheral(right) side
-    if (!zmk_split_bt_peripheral_is_bonded()) {
-        pixels[0].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE * last_ble_state[0];
-        pixels[0].g = 0;
-        pixels[0].b = 0;
-        pixels[1].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE * last_ble_state[0];
-        pixels[1].g = 0;
-        pixels[1].b = 0;
-        pixels[2].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE * last_ble_state[0];
-        pixels[2].g = 0;
-        pixels[2].b = 0;
-        if (state.animation_step > 3) {
-            last_ble_state[0] = !last_ble_state[0];
-            state.animation_step = 0;
-        }
-        state.animation_step++;
-    } else if (!zmk_split_bt_peripheral_is_connected()) {
-        pixels[0].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE * last_ble_state[1];
-        pixels[0].g = 0;
-        pixels[0].b = 0;
-        pixels[1].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE * last_ble_state[1];
-        pixels[1].g = 0;
-        pixels[1].b = 0;
-        pixels[2].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE * last_ble_state[1];
-        pixels[2].g = 0;
-        pixels[2].b = 0;
-        if (state.animation_step > 14) {
-            last_ble_state[1] = !last_ble_state[1];
-            state.animation_step = 0;
-        }
-        state.animation_step++;
-    } else {
 #endif
-        // set first led as LED_NUMLOCK
-        pixels[2].r =
-            (led_data.indicators & ZMK_LED_NUMLOCK_BIT) * CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[2].g =
-            (led_data.indicators & ZMK_LED_NUMLOCK_BIT) * CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[2].b =
-            (led_data.indicators & ZMK_LED_NUMLOCK_BIT) * CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        // set second led as scroll Lock
-        pixels[1].r =
-            (led_data.indicators & ZMK_LED_SCROLLLOCK_BIT) * CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[1].g =
-            (led_data.indicators & ZMK_LED_SCROLLLOCK_BIT) * CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        pixels[1].b =
-            (led_data.indicators & ZMK_LED_SCROLLLOCK_BIT) * CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-        // set third led as layer
-        switch (led_data.layer) {
-        case 0:
-            pixels[0].r = 0;
-            pixels[0].g = 0;
-            pixels[0].b = 0;
-            break;
-        case 1:
-            pixels[0].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            pixels[0].g = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            pixels[0].b = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            break;
-        case 2:
-            pixels[0].r = 0;
-            pixels[0].g = 0;
-            pixels[0].b = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            break;
-        case 3:
-            pixels[0].r = 0;
-            pixels[0].g = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            pixels[0].b = 0;
-            break;
-        case 4:
-            pixels[0].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            pixels[0].g = 0;
-            pixels[0].b = 0;
-            break;
-        case 5:
-            pixels[0].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            pixels[0].g = 0;
-            pixels[0].b = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            break;
-        case 6:
-            pixels[0].r = 0;
-            pixels[0].g = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            pixels[0].b = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            break;
-        case 7:
-            pixels[0].r = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            pixels[0].g = CONFIG_ZMK_RGB_UNDERGLOW_BRT_SCALE;
-            pixels[0].b = 0;
-            break;
-        default:
-            pixels[0].r = 0;
-            pixels[0].g = 0;
-            pixels[0].b = 0;
-            break;
-        }
+
+    bool bt_blinking = false;
+
+    uint8_t layer_color_left, layer_color_right;
+    zmk_led_layer_to_colors(led_data.layer, &layer_color_left, &layer_color_right);
+
+#if ZMK_BLE_IS_CENTRAL
+    // leds for central (left) side
+
+    // set first led to caps lock state
+    pixels[0] = led_data.indicators & ZMK_LED_CAPSLOCK_BIT ? LED_RGB(0xFFFFFF) : LED_RGB(0x000000);
+
+    // set second led to bluetooth state, blinking quickly if bluetooth not paired,
+    // and slowly if not connected
+    if (zmk_ble_active_profile_is_open()) {
+        bt_blinking = zmk_kinesis_blink_step(0, 2);
+    } else if (!zmk_ble_active_profile_is_connected()) {
+        bt_blinking = zmk_kinesis_blink_step(1, 13);
+    }
+    pixels[1] = bt_blinking ? LED_RGB(0x000000) : BT_COLORS[zmk_ble_active_profile_index()];
+
+    // set third led to layer state
+    pixels[2] = LAYER_COLORS[layer_color_left];
+#else
+    // leds for peripheral (right) side
+
+    // set first and second leds to num lock and scroll lock state, respectively
+    pixels[2] = led_data.indicators & ZMK_LED_NUMLOCK_BIT ? LED_RGB(0xFFFFFF) : LED_RGB(0x000000);
+    pixels[1] =
+        led_data.indicators & ZMK_LED_SCROLLLOCK_BIT ? LED_RGB(0xFFFFFF) : LED_RGB(0x000000);
+
+    // set third led to layer state
+    pixels[0] = LAYER_COLORS[layer_color_right];
+
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE)
+    bool bt_alert = false;
+    if (!zmk_split_bt_peripheral_is_bonded()) {
+        bt_alert = true;
+        bt_blinking = zmk_kinesis_blink_step(0, 2);
+    } else if (!zmk_split_bt_peripheral_is_connected()) {
+        bt_alert = true;
+        bt_blinking = zmk_kinesis_blink_step(1, 13);
+    }
+
+    if (bt_alert) {
+        // override all leds to blinking red due to bluetooth problem
+        struct led_rgb color = bt_blinking ? LED_RGB(0x000000) : LED_RGB(0xFF0000);
+        for (int i = 0; i < STRIP_NUM_PIXELS; i++)
+            pixels[i] = color;
     }
 #endif
 #endif
@@ -490,7 +375,6 @@ static void zmk_rgb_underglow_effect_test() {
 
     state.animation_step += 20;
     if (state.animation_step > (HUE_MAX * 3)) {
-
         rgb.r = 255;
         rgb.g = 255;
         rgb.b = 255;
@@ -504,7 +388,7 @@ static void zmk_rgb_underglow_effect_test() {
 static const uint8_t BATTERY_LEVELS[NUM_BATTERY_LEVELS] = {80, 50, 20};
 
 static const struct led_rgb BATTERY_COLORS[NUM_BATTERY_LEVELS + 1] = {
-    LED_RGB_HEX(0x00FF00), LED_RGB_HEX(0xFFFF00), LED_RGB_HEX(0xFF8C00), LED_RGB_HEX(0xFF0000)};
+    LED_RGB(0x00FF00), LED_RGB(0xFFFF00), LED_RGB(0xFF8C00), LED_RGB(0xFF0000)};
 
 static void zmk_rgb_underglow_effect_battery() {
     uint8_t soc = zmk_battery_state_of_charge();
@@ -513,7 +397,7 @@ static void zmk_rgb_underglow_effect_battery() {
     for (; color < NUM_BATTERY_LEVELS && soc < BATTERY_LEVELS[color]; color++)
         ;
 
-    struct led_rgb rgb = zmk_rgb_underglow_scaled(BATTERY_COLORS[color]);
+    struct led_rgb rgb = BATTERY_COLORS[color];
     for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
         pixels[i] = rgb;
     }
