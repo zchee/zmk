@@ -1,3 +1,5 @@
-board:
-  - adv360pro_left
-  - adv360pro_right
+board: []
+shield: []
+include:
+  - board: adv360pro_left
+  - board: adv360pro_right
