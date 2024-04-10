@@ -264,6 +264,11 @@ static bool zmk_kinesis_blink_step(uint8_t idx, uint8_t limit) {
     return !last_ble_state[idx];
 }
 
+static struct led_rgb zmk_get_indicator_color(zmk_hid_indicators_t bit) {
+    return led_data.indicators & bit ? LED_RGB(CONFIG_ZMK_RGB_UNDERGLOW_MOD_COLOR)
+                                     : LED_RGB(0x000000);
+}
+
 static void zmk_rgb_underglow_effect_kinesis() {
 #if ZMK_BLE_IS_CENTRAL
     // update state and propagate to peripheral if necessary
@@ -286,7 +291,7 @@ static void zmk_rgb_underglow_effect_kinesis() {
     // leds for central (left) side
 
     // set first led to caps lock state
-    pixels[0] = led_data.indicators & ZMK_LED_CAPSLOCK_BIT ? LED_RGB(0xFFFFFF) : LED_RGB(0x000000);
+    pixels[0] = zmk_get_indicator_color(ZMK_LED_CAPSLOCK_BIT);
 
     // set second led to bluetooth state, blinking quickly if bluetooth not paired,
     // and slowly if not connected
@@ -303,9 +308,8 @@ static void zmk_rgb_underglow_effect_kinesis() {
     // leds for peripheral (right) side
 
     // set first and second leds to num lock and scroll lock state, respectively
-    pixels[2] = led_data.indicators & ZMK_LED_NUMLOCK_BIT ? LED_RGB(0xFFFFFF) : LED_RGB(0x000000);
-    pixels[1] =
-        led_data.indicators & ZMK_LED_SCROLLLOCK_BIT ? LED_RGB(0xFFFFFF) : LED_RGB(0x000000);
+    pixels[2] = zmk_get_indicator_color(ZMK_LED_NUMLOCK_BIT);
+    pixels[1] = zmk_get_indicator_color(ZMK_LED_SCROLLLOCK_BIT);
 
     // set third led to layer state
     pixels[0] = LAYER_COLORS[layer_color_right];

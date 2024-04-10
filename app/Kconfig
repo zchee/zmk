@@ -341,6 +341,11 @@ config ZMK_RGB_UNDERGLOW_AUTO_OFF_USB
     bool "Turn off RGB underglow when USB is disconnected"
     depends on USB_DEVICE_STACK
 
+config ZMK_RGB_UNDERGLOW_MOD_COLOR
+    hex "RGB hex color of CAPS/SCROLL/NUM LOCK indicators"
+    range 0x000000 0xFFFFFF
+    default 0xFFFFFF
+
 #ZMK_RGB_UNDERGLOW
 endif
 
